@@ -37,7 +37,7 @@ datetime        lastBarTime = 0;
 int panelX = 10;
 int panelY = 20;
 int panelWidth = 280;  // Increased width for better text display
-int panelHeight = 360; // Increased height to fit new button
+int panelHeight = 395; // Increased height to fit new button
 color panelBgColor = C'240,240,240';  // Light gray
 color textColor = clrBlack;
 
@@ -81,6 +81,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0, "lblRiskInfo");
    ObjectDelete(0, "lblAutopilot");
    ObjectDelete(0, "btnInstantSL");
+   ObjectDelete(0, "btnReverseOnFailure");
    
    Print("MTLBOV1 Automated Execution EA deinitialized");
 }
@@ -102,7 +103,6 @@ void OnTick()
       HandleAutopilot();
    }
 }
-
 //+------------------------------------------------------------------+
 //| ChartEvent function                                              |
 //+------------------------------------------------------------------+
@@ -144,9 +144,13 @@ void OnChartEvent(const int id,
          Print("Instant SL Adjustment button clicked");
          AdjustStopLoss();
       }
+      else if(sparam == "btnReverseOnFailure")
+      {
+         Print("Reverse On Failure button clicked");
+         ReverseOnFailure();
+      }
    }
 }
-
 //+------------------------------------------------------------------+
 //| Create UI elements                                              |
 //+------------------------------------------------------------------+
@@ -310,6 +314,19 @@ void CreateUI()
    ObjectSetInteger(0, "btnInstantSL", OBJPROP_BGCOLOR, clrOrange);
    ObjectSetInteger(0, "btnInstantSL", OBJPROP_COLOR, clrWhite);
    ObjectSetInteger(0, "btnInstantSL", OBJPROP_FONTSIZE, 9);
+   
+   y += spacing;
+   
+   // Create Reverse On Failure button
+   ObjectCreate(0, "btnReverseOnFailure", OBJ_BUTTON, 0, 0, 0);
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_XDISTANCE, x + 5);
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_YDISTANCE, y + 5);
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_YSIZE, height);
+   ObjectSetString(0, "btnReverseOnFailure", OBJPROP_TEXT, "Reverse On Failure");
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_BGCOLOR, clrPurple);
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, "btnReverseOnFailure", OBJPROP_FONTSIZE, 9);
    
    ChartRedraw();
 }
@@ -994,6 +1011,96 @@ void AdjustStopLoss()
             }
             
             return; // Only adjust one position
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Reverse On Failure - Adjust SL and place reverse pending order   |
+//+------------------------------------------------------------------+
+void ReverseOnFailure()
+{
+   // Check if we have an open position
+   if(!HasOpenPosition())
+   {
+      Print("No open position for Reverse On Failure");
+      Alert("No open position to reverse!");
+      return;
+   }
+   
+   // Get previous bar data
+   double prevHigh = iHigh(Symbol(), PERIOD_CURRENT, 1);
+   double prevLow = iLow(Symbol(), PERIOD_CURRENT, 1);
+   double spread = SymbolInfoInteger(Symbol(), SYMBOL_SPREAD) * _Point;
+   
+   // Find and select our position
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Magic() == MagicNumber && positionInfo.Symbol() == Symbol())
+         {
+            ENUM_POSITION_TYPE posType = positionInfo.PositionType();
+            
+            if(posType == POSITION_TYPE_BUY)
+            {
+               // For LONG positions:
+               // 1. Adjust SL using existing function (previousBarLow - 1 tick)
+               AdjustStopLoss();
+               
+               // 2. Place SELL STOP at previousBarLow - 1 tick
+               // Store current previousBar values for our order
+               double savedPrevHigh = previousBarHigh;
+               double savedPrevLow = previousBarLow;
+               
+               // Temporarily set previousBarHigh to prevLow for sell stop placement
+               // and previousBarLow to prevLow - 1 tick to get the correct entry
+               previousBarHigh = prevLow - _Point;
+               previousBarLow = prevLow - _Point;
+               
+               // Cancel existing pending orders first
+               CancelAllPendingOrders();
+               
+               // Place SELL STOP using existing function
+               PlaceSellStopOrder();
+               
+               // Restore original values
+               previousBarHigh = savedPrevHigh;
+               previousBarLow = savedPrevLow;
+            }
+            else if(posType == POSITION_TYPE_SELL)
+            {
+               // For SHORT positions:
+               // 1. Adjust SL using existing function (previousBarHigh + 1 tick + spread)
+               AdjustStopLoss();
+               
+               // 2. Place BUY STOP at previousBarHigh
+               // Store current previousBar values
+               double savedPrevHigh = previousBarHigh;
+               double savedPrevLow = previousBarLow;
+               
+               // Set previousBarHigh to prevHigh for buy stop placement
+               previousBarHigh = prevHigh;
+               previousBarLow = prevHigh - _Point;
+               
+               // Cancel existing pending orders first
+               CancelAllPendingOrders();
+               
+               // Place BUY STOP using existing function
+               PlaceBuyStopOrder();
+               
+               // Restore original values
+               previousBarHigh = savedPrevHigh;
+               previousBarLow = savedPrevLow;
+            }
+            else
+            {
+               Print("Unknown position type");
+               return;
+            }
+            
+            return; // Only process one position
          }
       }
    }
