@@ -18,7 +18,7 @@ input double   PreferredRisk = 50.0;          // Preferred Risk ($)
 input double   RiskMultiplier = 1.0;          // TP Distance Multiplier
 input double   SpreadMultiplier = 1.0;        // Spread Adjustment Multiplier
 input int      MagicNumber = 000001;          // Magic Number
-input string   TradeComment = "MTLBOV1";      // Trade Comment
+input string   TradeComment = "BPA_Position_Manager";      // Trade Comment
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                |
@@ -26,7 +26,6 @@ input string   TradeComment = "MTLBOV1";      // Trade Comment
 CTrade          trade;
 CPositionInfo   positionInfo;
 COrderInfo      orderInfo;
-
 double          previousBarHigh = 0.0;
 double          previousBarLow = 0.0;
 bool            autopilotEnabled = false;
@@ -38,7 +37,7 @@ datetime        lastBarTime = 0;
 int panelX = 10;
 int panelY = 20;
 int panelWidth = 280;  // Increased width for better text display
-int panelHeight = 320; // Increased height to fit all text
+int panelHeight = 360; // Increased height to fit new button
 color panelBgColor = C'240,240,240';  // Light gray
 color textColor = clrBlack;
 
@@ -81,6 +80,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0, "lblMarketInfo");
    ObjectDelete(0, "lblRiskInfo");
    ObjectDelete(0, "lblAutopilot");
+   ObjectDelete(0, "btnInstantSL");
    
    Print("MTLBOV1 Automated Execution EA deinitialized");
 }
@@ -138,6 +138,11 @@ void OnChartEvent(const int id,
       {
          Print("Always In Short button clicked");
          SetAlwaysInShort();
+      }
+      else if(sparam == "btnInstantSL")
+      {
+         Print("Instant SL Adjustment button clicked");
+         AdjustStopLoss();
       }
    }
 }
@@ -292,6 +297,19 @@ void CreateUI()
    ObjectSetString(0, "lblStatus", OBJPROP_TEXT, "Status: Ready");
    ObjectSetInteger(0, "lblStatus", OBJPROP_COLOR, textColor);
    ObjectSetInteger(0, "lblStatus", OBJPROP_FONTSIZE, 9);
+   
+   y += spacing;
+   
+   // Create Instant SL Adjustment button
+   ObjectCreate(0, "btnInstantSL", OBJ_BUTTON, 0, 0, 0);
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_XDISTANCE, x + 5);
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_YDISTANCE, y + 5);
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_YSIZE, height);
+   ObjectSetString(0, "btnInstantSL", OBJPROP_TEXT, "Instant SL Adjustment");
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_BGCOLOR, clrOrange);
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, "btnInstantSL", OBJPROP_FONTSIZE, 9);
    
    ChartRedraw();
 }
@@ -911,5 +929,72 @@ void OnTrade()
    {
       CancelAllPendingOrders();
       Print("Position opened, cancelled all pending orders");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Adjust Stop Loss to previous bar levels                          |
+//+------------------------------------------------------------------+
+void AdjustStopLoss()
+{
+   // Check if we have an open position
+   if(!HasOpenPosition())
+   {
+      Print("No open position to adjust");
+      Alert("No open position to adjust!");
+      return;
+   }
+   
+   // Get previous bar data
+   double prevHigh = iHigh(Symbol(), PERIOD_CURRENT, 1);
+   double prevLow = iLow(Symbol(), PERIOD_CURRENT, 1);
+   
+   // Find and select our position
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Magic() == MagicNumber && positionInfo.Symbol() == Symbol())
+         {
+            ENUM_POSITION_TYPE posType = positionInfo.PositionType();
+            ulong ticket = positionInfo.Ticket();
+            double currentSL = positionInfo.StopLoss();
+            double newSL = 0;
+            
+            if(posType == POSITION_TYPE_BUY)
+            {
+               // For LONG positions: SL = previousBarLow - 1 tick
+               newSL = prevLow - _Point;
+               Print("Adjusting LONG position SL from ", currentSL, " to ", newSL);
+            }
+            else if(posType == POSITION_TYPE_SELL)
+            {
+               // For SHORT positions: SL = previousBarHigh + 1 tick + spread
+               double spread = SymbolInfoInteger(Symbol(), SYMBOL_SPREAD) * _Point;
+               newSL = prevHigh + _Point + spread;
+               Print("Adjusting SHORT position SL from ", currentSL, " to ", newSL);
+            }
+            else
+            {
+               Print("Unknown position type");
+               return;
+            }
+            
+            // Normalize the new SL price
+            newSL = NormalizeDouble(newSL, _Digits);
+            
+            // Modify the position's stop loss
+            if(trade.PositionModify(ticket, newSL, positionInfo.TakeProfit()))
+            {
+               Print("Successfully adjusted SL to ", newSL);
+            }
+            else
+            {
+               Print("Failed to adjust SL. Error: ", GetLastError());
+            }
+            
+            return; // Only adjust one position
+         }
+      }
    }
 }
