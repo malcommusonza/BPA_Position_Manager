@@ -739,11 +739,11 @@ void PlaceBuyStopOrder()
       return;
    }
    
-   // Calculate spread adjustment
-   double spreadAdjustment = GetSpreadAdjustedPrice(true);
+   // Calculate spread adjustment for entry (positive value)
+   double spreadAdjustmentEntry = MathAbs(GetSpreadAdjustedPrice(true));
    
    // Calculate entry price (previous high + 1 tick + spread adjustment)
-   double entryPrice = previousBarHigh + _Point + spreadAdjustment;
+   double entryPrice = previousBarHigh + _Point + spreadAdjustmentEntry;
    
    // Calculate stop loss price (previous low - 1 tick)
    double slPrice = previousBarLow - _Point;
@@ -770,12 +770,9 @@ void PlaceBuyStopOrder()
       return;
    }
    
-   // Calculate TP (entry + distance from entry to SL, adjusted by spread)
+   // Calculate TP (entry + distance from entry to SL) - NO spread adjustment
    double distanceToSL = entryPrice - slPrice;
    double tpPrice = entryPrice + (distanceToSL * RiskMultiplier);
-   
-   // Add spread adjustment to TP if needed
-   tpPrice += GetSpreadAdjustedPrice(false);
    
    // Calculate position size based on risk
    double lots = CalculatePositionSize(ORDER_TYPE_BUY_STOP, entryPrice, slPrice);
@@ -787,9 +784,9 @@ void PlaceBuyStopOrder()
    tpPrice = NormalizeDouble(tpPrice, _Digits);
    
    Print("Placing BUY STOP:");
-   Print("  Entry: ", entryPrice);
+   Print("  Entry: ", entryPrice, " (+", spreadAdjustmentEntry, " spread adj)");
    Print("  SL: ", slPrice);
-   Print("  TP: ", tpPrice);
+   Print("  TP: ", tpPrice, " (no spread adjustment)");
    Print("  Lots: ", lots);
    
    // Place the order with correct parameter order
@@ -811,14 +808,14 @@ void PlaceSellStopOrder()
       return;
    }
    
-   // Calculate spread adjustment
-   double spreadAdjustment = GetSpreadAdjustedPrice(false);
+   // Calculate spread adjustment (positive value for SL/TP movement)
+   double spreadAdjustment = MathAbs(GetSpreadAdjustedPrice(false));
    
    // Calculate entry price (previous low - 1 tick)
    double entryPrice = previousBarLow - _Point;
    
    // Calculate stop loss price (previous high + 1 tick + spread adjustment)
-   double slPrice = previousBarHigh + _Point - spreadAdjustment;
+   double slPrice = previousBarHigh + _Point + spreadAdjustment;
    
    // Get current bid price and minimum stop distance
    double currentBid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
@@ -842,12 +839,9 @@ void PlaceSellStopOrder()
       return;
    }
    
-   // Calculate TP (entry - distance from entry to SL, adjusted by spread)
+   // Calculate TP (entry - distance from entry to SL + spread adjustment)
    double distanceToSL = slPrice - entryPrice;
-   double tpPrice = entryPrice - (distanceToSL * RiskMultiplier);
-   
-   // Add spread adjustment to TP if needed
-   tpPrice += GetSpreadAdjustedPrice(false);
+   double tpPrice = entryPrice - (distanceToSL * RiskMultiplier) + spreadAdjustment;
    
    // Calculate position size based on risk
    double lots = CalculatePositionSize(ORDER_TYPE_SELL_STOP, entryPrice, slPrice);
@@ -863,6 +857,7 @@ void PlaceSellStopOrder()
    Print("  SL: ", slPrice);
    Print("  TP: ", tpPrice);
    Print("  Lots: ", lots);
+   Print("  Spread Adjustment: +", spreadAdjustment, " (moves SL & TP up)");
    
    // Place the order with correct parameter order
    if(!trade.SellStop(lots, entryPrice, Symbol(), slPrice, tpPrice, ORDER_TIME_GTC, 0, TradeComment))
